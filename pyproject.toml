@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "orch"
+version = "0.1.0"
+description = "Оркестратор разработки: опрос → план → тесты до кода → параллельные воркеры в git worktree"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+orch = "orch.cli:main"
+
+[tool.setuptools]
+packages = ["orch"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
