@@ -24,9 +24,25 @@
 
 ## Установка
 
+### Быстрая — через pipx (рекомендуется)
+
+[pipx](https://pipx.pypa.io) ставит консольные утилиты в отдельное окружение и добавляет их в PATH.
+Установить сам pipx (один раз, затем перезапустить терминал): на Windows
+`python -m pip install --user pipx` и `python -m pipx ensurepath`, на Ubuntu/Debian `sudo apt install pipx` и `pipx ensurepath`.
+
+```bash
+pipx install git+https://github.com/sowaaaaa/orcha.git@v0.1.0
+orch install-skill
+```
+
+Обновление до новой версии: `pipx install --force git+https://github.com/sowaaaaa/orcha.git@<версия>`,
+затем снова `orch install-skill`.
+
+### Из исходников — если хотите менять код или запускать тесты
+
 **Windows**
 ```powershell
-git clone https://github.com/sowaaaaa/orchestra.git orchestrator
+git clone https://github.com/sowaaaaa/orcha.git orchestrator
 cd orchestrator
 python -m venv .venv
 .venv\Scripts\python -m pip install -e ".[dev]"
@@ -36,7 +52,7 @@ python -m venv .venv
 
 **Linux**
 ```bash
-git clone https://github.com/sowaaaaa/orchestra.git ~/orchestrator
+git clone https://github.com/sowaaaaa/orcha.git ~/orchestrator
 cd ~/orchestrator
 python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
@@ -112,8 +128,9 @@ setup = ""              # команда подготовки копии, нап
 
 Аккаунт Claude общий, но файлы он не синхронизирует. Поэтому:
 
-1. Код лежит в https://github.com/sowaaaaa/orchestra (лучше держать репозиторий приватным).
+1. Код лежит в публичном репозитории https://github.com/sowaaaaa/orcha.
    Изменения с первого устройства отправляются туда через `git push`.
+   Если на втором устройстве код менять не нужно, хватит быстрой установки через pipx.
 2. На втором устройстве (Windows или Linux): установите git, Python 3.11+, Claude Code и войдите тем же аккаунтом (`claude` → `/login`).
 3. Выполните шаги из раздела «Установка», включая `orch install-skill`.
 4. Обновления: `git pull` в папке оркестратора, затем `orch install-skill` (навык мог измениться).
@@ -141,3 +158,9 @@ setup = ""              # команда подготовки копии, нап
 .venv/bin/python -m pytest         # Linux
 ```
 Тесты используют фейковую модель со сценарием и настоящий git: бесплатно, около минуты.
+
+История версий — [CHANGELOG.md](CHANGELOG.md).
+
+## Лицензия
+
+MIT — см. [LICENSE](LICENSE).
