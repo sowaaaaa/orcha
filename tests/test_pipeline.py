@@ -126,6 +126,22 @@ def test_regression_is_rolled_back_and_dependents_skipped(repo):
     assert state.final_green is True
 
 
+def test_failed_task_work_is_kept_in_branch_and_copy_removed(repo):
+    # Копии упавших задач не остаются в проекте (иначе jest/vitest найдут в .orch чужие тесты),
+    # а наработки сохраняются в ветке задачи.
+    def wrong_mul(call):
+        write(call.cwd, "calc_mul.py", "def mul(a, b):\n    return a + b\n")
+        return "Готово"
+
+    ui = FakeUI()
+    sc = Scenario(code={"mul": wrong_mul})
+    state = Orchestrator(repo, sc.llm(), ui, Config(parallel=2, max_code_attempts=1)).run("Калькулятор")
+    assert state.tasks["mul"]["status"] == "failed"
+    assert worktree_count(repo) == 1
+    assert "return a + b" in git(repo, "show", f"orch/{state.run_id}/mul:calc_mul.py")
+    assert any(f"orch/{state.run_id}/mul" in m for m in ui.messages)
+
+
 def test_merge_conflict_fails_only_that_task(repo):
     def a_code(call):
         write(call.cwd, *CODE["add"])
@@ -190,6 +206,25 @@ def test_interview_can_be_skipped(repo):
     ui = FakeUI()
     Orchestrator(repo, llm, ui, Config(parallel=2)).run("Калькулятор", interview=False)
     assert llm.of("interview") == [] and ui.questions == []
+
+
+def test_ready_plan_skips_interview_and_planning(repo):
+    llm = Scenario().llm()
+    ui = FakeUI()
+    state = Orchestrator(repo, llm, ui, Config(parallel=2)).run("Калькулятор", plan=PLAN)
+    assert llm.of("interview") == [] and llm.of("plan") == []
+    assert statuses(state) == {"add": "done", "mul": "done", "power": "done"}
+    assert state.plan == PLAN
+    assert any(state.run_id in m for m in ui.messages[:3])  # номер запуска сообщается сразу
+
+
+def test_invalid_ready_plan_is_rejected_before_work(repo):
+    llm = Scenario().llm()
+    with pytest.raises(OrchError) as e:
+        Orchestrator(repo, llm, FakeUI(), Config()).run("x", plan=plan(task("add", ["nope"])))
+    assert "nope" in str(e.value)
+    assert llm.calls == []
+    assert git(repo, "branch", "--list", "orch/*") == ""
 
 
 def test_state_is_persisted(repo):

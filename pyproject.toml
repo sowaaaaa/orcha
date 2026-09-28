@@ -18,6 +18,9 @@ orch = "orch.cli:main"
 [tool.setuptools]
 packages = ["orch"]
 
+[tool.setuptools.package-data]
+orch = ["skill/*.md"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

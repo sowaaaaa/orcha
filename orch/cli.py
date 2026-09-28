@@ -1,9 +1,11 @@
 """Командная строка: orch run | resume | status."""
 import argparse
+import json
 import sys
 import threading
 from pathlib import Path
 
+from .bootstrap import init_project, install_skill
 from .config import ConfigError, load_config
 from .git_ops import GitError
 from .llm import ClaudeCLI, LLMError
@@ -45,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     run = sub.add_parser("run", help="выполнить новую задачу")
     run.add_argument("task", help="описание задачи")
     run.add_argument("--no-interview", action="store_true", help="без уточняющих вопросов")
+    run.add_argument("--plan", help="готовый план (JSON-файл), например составленный в чате /orch")
 
     resume = sub.add_parser("resume", help="доделать незавершённые подзадачи запуска")
     resume.add_argument("run_id")
@@ -59,6 +62,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     for sp in (run, resume, status):
         sp.add_argument("--repo", default=".", help="папка проекта (по умолчанию текущая)")
+
+    init = sub.add_parser("init", help="подготовить папку проекта: git, первый коммит, .gitignore, orch.toml")
+    init.add_argument("path", nargs="?", default=".")
+
+    skill = sub.add_parser("install-skill", help="установить навык /orch для Claude Code")
+    skill.add_argument("--dir", help="папка навыков (по умолчанию ~/.claude/skills)")
     return p
 
 
@@ -69,6 +78,12 @@ def main(argv=None) -> int:
         except (AttributeError, ValueError):
             pass
     args = build_parser().parse_args(argv)
+    if args.cmd == "init":
+        return _init(Path(args.path))
+    if args.cmd == "install-skill":
+        dst = install_skill(args.dir)
+        print(f"Навык установлен: {dst}\nВ Claude Code откройте папку проекта и напишите: /orch <что сделать>")
+        return 0
     repo = Path(args.repo).resolve()
     if args.cmd == "status":
         return _status(repo, args.run_id)
@@ -83,7 +98,8 @@ def main(argv=None) -> int:
         llm = ClaudeCLI({"brain": cfg.brain_model, "worker": cfg.worker_model}, timeout=cfg.llm_timeout)
         orch = Orchestrator(repo, llm, ConsoleUI(yes=args.yes), cfg)
         if args.cmd == "run":
-            state = orch.run(args.task, interview=not args.no_interview)
+            plan = _load_plan(args.plan) if args.plan else None
+            state = orch.run(args.task, interview=not args.no_interview, plan=plan)
         else:
             state = orch.resume(args.run_id)
     except (OrchError, GitError, LLMError, ConfigError, PlanError) as e:
@@ -117,4 +133,33 @@ def _status(repo: Path, run_id: str | None) -> int:
         if run_id:
             for tid, e in s.tasks.items():
                 print(f"    {tid}: {e['status']} {e['reason']}")
+                if e.get("detail"):
+                    for line in e["detail"].strip().splitlines()[-15:]:
+                        print(f"        {line}")
+    return 0
+
+
+def _load_plan(path: str) -> dict:
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8-sig"))  # -sig: файл мог сохраниться с BOM
+    except OSError as e:
+        raise OrchError(f"не удалось прочитать план {path}: {e.strerror or e}")
+    except ValueError as e:
+        raise OrchError(f"план {path} — не JSON: {e}")
+
+
+def _init(path: Path) -> int:
+    try:
+        actions = init_project(path)
+    except GitError as e:
+        print(f"Ошибка: {e}")
+        return 1
+    if actions:
+        print("Готово:")
+        for a in actions:
+            print(f"  - {a}")
+    else:
+        print("Проект уже подготовлен — делать ничего не нужно.")
+    print(f"Дальше: откройте {path.resolve()} в Claude Code и напишите /orch <что сделать>"
+          " (или в терминале: orch run \"задача\").")
     return 0

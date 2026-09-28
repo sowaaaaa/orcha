@@ -42,25 +42,34 @@ class Orchestrator:
 
     # ---------- публичные команды ----------
 
-    def run(self, task_text: str, interview: bool = True) -> RunState:
+    def run(self, task_text: str, interview: bool = True, plan: dict | None = None) -> RunState:
+        """plan — готовый план (например, составленный в чате /orch): опрос и планирование пропускаются."""
         self.repo = git_ops.ensure_repo(self.repo)
+        if plan is not None:
+            try:
+                ready = parse_plan(plan)
+            except ValueError as e:
+                raise OrchError(f"план не прошёл проверку: {e}")
         git_ops.exclude(self.repo, ".orch/")
         state = self.state = RunState(run_id=self._new_run_id(), task=task_text, base=git_ops.head(self.repo))
         state.branch = f"orch/{state.run_id}/main"
 
-        if interview:
-            state.qa = self._interview(task_text)
-        data, plan = self._plan(state)
+        if plan is not None:
+            data = plan
+        else:
+            if interview:
+                state.qa = self._interview(task_text)
+            data, ready = self._plan(state)
         state.plan = data
-        state.full_test_command = self.cfg.full_test_command or plan.full_test_command
-        state.tasks = {t.id: {"status": "pending", "reason": "", "attempts": 0, "detail": ""} for t in plan.tasks}
+        state.full_test_command = self.cfg.full_test_command or ready.full_test_command
+        state.tasks = {t.id: {"status": "pending", "reason": "", "attempts": 0, "detail": ""} for t in ready.tasks}
         self._save()
 
-        if not self.ui.confirm(render_plan(plan, state.full_test_command)):
+        if not self.ui.confirm(render_plan(ready, state.full_test_command)):
             state.status = "cancelled"
             self._save()
             return state
-        return self._execute(plan)
+        return self._execute(ready)
 
     def resume(self, run_id: str) -> RunState:
         self.repo = git_ops.ensure_repo(self.repo)
@@ -111,6 +120,7 @@ class Orchestrator:
             git_ops.exclude(self.repo, f"/{name}")
         state.status = "running"
         self._save()
+        self.ui.info(f"Запуск {state.run_id}, ветка результата {state.branch}. Ход: orch status {state.run_id}")
 
         # Проверка регрессий включается, как только полный набор тестов зелёный.
         self._gate = False
@@ -129,6 +139,8 @@ class Orchestrator:
                 entry.update(status="skipped", reason="dependency")
             elif status == "failed" and entry["status"] != "failed":
                 entry.update(status="failed", reason="error")
+            if status == "failed":
+                self._stash_failed(tid)
 
         if state.full_test_command:
             state.final_green = run_tests(state.full_test_command, self._main, cfg.test_timeout).passed
@@ -190,9 +202,22 @@ class Orchestrator:
     def _fail(self, task, reason: str, detail: str = "") -> bool:
         self.state.tasks[task.id].update(status="failed", reason=reason, detail=detail[-2000:])
         self._save()
-        wt, _ = self._paths(task.id)
-        self.ui.info(f"✘ {task.id}: {REASONS.get(reason, reason)}. Копия для разбора: {wt}")
+        _, branch = self._paths(task.id)
+        self.ui.info(f"✘ {task.id}: {REASONS.get(reason, reason)}. Наработки — в ветке {branch}")
         return False
+
+    def _stash_failed(self, tid: str) -> None:
+        """Наработки упавшей задачи — коммитом в её ветку, копию проекта — убрать.
+        Иначе jest/vitest в основной папке найдут тесты внутри .orch."""
+        wt, branch = self._paths(tid)
+        if not wt.exists():
+            return
+        try:
+            git_ops.commit_all(wt, f"orch({tid}): незавершённая попытка")
+        except git_ops.GitError as e:
+            self.ui.info(f"Не удалось сохранить наработки {tid} в ветку ({e}); копия оставлена: {wt}")
+            return
+        git_ops.remove_worktree(self.repo, wt)
 
     # ---------- служебное ----------
 
